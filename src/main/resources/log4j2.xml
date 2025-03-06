@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Configuration xmlns="http://logging.apache.org/log4j/2.0/config" status="INFO">
+    <Properties>
+        <Property name="logDir">api</Property>
+    </Properties>
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d[HH:mm:ss.SSS] [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+
+        <!-- File Appender: 按服务名动态设置路径 -->
+        <RollingFile name="ServiceFileAppender" fileName="/data/logs/${logDir}/${logDir}.log" filePattern="/data/logs/${logDir}/${logDir}-%d{yyyy-MM-dd}.log">
+            <PatternLayout pattern="%d[yyyy-MM-dd HH:mm:ss.SSS] [%t] %-5level %logger{36} - %msg%n"/>
+            <Policies>
+                <!-- 按日期滚动日志 -->
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30"/>
+        </RollingFile>
+    </Appenders>
+    <Loggers>
+        <Root level="info">
+            <appender-ref ref="Console"/>
+            <AppenderRef ref="ServiceFileAppender"/>
+        </Root>
+    </Loggers>
+</Configuration>

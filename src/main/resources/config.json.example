@@ -1,0 +1,22 @@
+{
+  "instances": 4,
+  "sn": "",
+  "ip": "",
+  "address": {
+    "host": "127.0.0.1",
+    "port": 8099
+  },
+  "docker": {
+      "host": "",
+      "maxConnection": 10,
+      "connectionTimeout": 30000,
+      "responseTimeout": 40000
+    },
+  "sql": "",
+  "database": {
+    "host": "http://localhost:8086",
+    "token": "",
+    "org": "",
+    "bucket": ""
+  }
+}

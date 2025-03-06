@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "instances": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sn": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9-]+)+|[c-zC-Z]:(\\\\[A-Za-z0-9\\s-]+)+$"
+    },
+    "ip": {
+      "type": "string",
+      "pattern": "^((/[A-Za-z0-9-]+)+|[c-zC-Z]:(\\\\[A-Za-z0-9\\s-]+)+)\\.txt$"
+    },
+    "address": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "format": "ipv4"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 65535
+        }
+      },
+      "required": ["host", "port"]
+    },
+    "docker": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "maxConnection": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "connectionTimeout": {
+          "type": "integer",
+          "minimum": 5000
+        },
+        "responseTimeout": {
+          "type": "integer",
+          "minimum": 20000
+        }
+      },
+      "required": ["host", "maxConnection", "connectionTimeout", "responseTimeout"]
+    },
+    "sql": {
+      "type": "string",
+      "pattern": "^((/[A-Za-z0-9-_]+)+|[c-zC-Z]:(\\\\[A-Za-z0-9\\s-_]+)+)\\.(db|db3|sqlite)$"
+    },
+    "filePath": {
+      "type": "string",
+      "pattern": "^((/[A-Za-z0-9-_]+)+|[c-zC-Z]:(\\\\[A-Za-z0-9\\s-_]+)+)"
+    },
+    "saveUpdateDir": {
+      "type": "string",
+      "pattern": "^((/[A-Za-z0-9-_]+)+|[c-zC-Z]:(\\\\[A-Za-z0-9\\s-_]+)+)"
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "format": "uri"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "org": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["host", "token", "org", "bucket"]
+    }
+  },
+  "required": ["instances", "sn", "ip", "address", "docker", "sql", "database"]
+}
