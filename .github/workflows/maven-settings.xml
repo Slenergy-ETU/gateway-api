@@ -37,7 +37,7 @@
             <repositories>
                 <repository>
                     <id>github</id>
-                    <url>https://maven.pkg.github.com/Slenergy-Industry-and-Commerce/Slenergy-Repo</url>
+                    <url>https://maven.pkg.github.com/Slenergy-ETU/Slenergy-Repo</url>
                 </repository>
             </repositories>
         </profile>

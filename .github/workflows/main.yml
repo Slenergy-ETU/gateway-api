@@ -66,5 +66,5 @@ jobs:
       - name: build image
         run: |
           docker login ghcr.io --username=${{ secrets.USER_NAME }} --password=${{ secrets.ACCESS_TOKEN }}
-          docker build --platform=linux/arm64 --build-arg username=${{ secrets.USER_NAME }} --build-arg password=${{ secrets.ACCESS_TOKEN }} --force-rm -t ghcr.io/slenergy-industry-and-commerce/slenergy/gateway-api:1.0-SNAPTSHOT .
-          docker push ghcr.io/slenergy-industry-and-commerce/slenergy/gateway-api:1.0-SNAPTSHOT
+          docker build --platform=linux/arm64 --build-arg username=${{ secrets.USER_NAME }} --build-arg password=${{ secrets.ACCESS_TOKEN }} --force-rm -t ghcr.io/slenergy-etu/slenergy/gateway-api:1.0-SNAPTSHOT .
+          docker push ghcr.io/slenergy-etu/slenergy/gateway-api:1.0-SNAPTSHOT

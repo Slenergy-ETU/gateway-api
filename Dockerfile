@@ -13,7 +13,7 @@ COPY pom.xml checkstyle.xml /api/
 
 RUN cd /etc/maven \
     && sed -i "124 a <server><id>github<\/id><username>${username}<\/username><password>${password}<\/password><\/server>" settings.xml \
-    && sed -i '219 a <profile><id>github<\/id><repositories><repository><id>github<\/id><url>https:\/\/maven.pkg.github.com\/Slenergy-Industry-and-Commerce\/Slenergy-Repo<\/url><\/repository><\/repositories><\/profile>' settings.xml \
+    && sed -i '219 a <profile><id>github<\/id><repositories><repository><id>github<\/id><url>https:\/\/maven.pkg.github.com\/Slenergy-ETU\/Slenergy-Repo<\/url><\/repository><\/repositories><\/profile>' settings.xml \
     && sed -i '257 a <activeProfiles><activeProfile>github<\/activeProfile><\/activeProfiles>' settings.xml \
     && cd /api \
     && mvn clean package assembly:single
