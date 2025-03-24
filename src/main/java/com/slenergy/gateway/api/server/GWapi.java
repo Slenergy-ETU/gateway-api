@@ -212,6 +212,13 @@ public class GWapi extends AbstractVerticle {
             //pcs信息
             String pcsRuntimeInfoData = getInfoData(db, "pcs", "runtimeInformation", "-3m");
             String pcsConfigInfoData = getInfoData(db, "pcs", "configurationInformation", "-3m");
+            //北斗
+            String beidouRuntimeInfoData = getInfoData(db, "beidou", "runtimeInformation", "-30s");
+            String beidouConfigInfoData = getInfoData(db, "beidou", "configurationInformation", "-30s");
+            //空调
+            String airRuntimeInfoData = getInfoData(db, "AirConditioner", "runtimeInformation", "-30s");
+            String airConfigInfoData = getInfoData(db, "AirConditioner", "configurationInformation", "-30s");
+
             //数据采集器信息
             DeviceMessage dm = DeviceMessage.getInstance();
             EmsBox emsBox = dm.getEmsBox();
@@ -232,6 +239,9 @@ public class GWapi extends AbstractVerticle {
             JsonObject ioModuleJson = new JsonObject().put("runtimeInfo", ioModuleRuntimeInfoData).put("configInfo", ioModuleConfigInfoData);
             JsonObject liquidCoolingJson = new JsonObject().put("runtimeInfo", liquidCoolingRuntimeInfoData).put("configInfo", liquidCoolingConfigInfoData);
             JsonObject pcsJson = new JsonObject().put("runtimeInfo", pcsRuntimeInfoData).put("configInfo", pcsConfigInfoData);
+            JsonObject bdJson = new JsonObject().put("runtimeInfo", beidouRuntimeInfoData).put("configInfo", beidouConfigInfoData);
+            JsonObject airJson = new JsonObject().put("runtimeInfo", airRuntimeInfoData).put("configInfo", airConfigInfoData);
+
             JsonObject ebox = new JsonObject().put("runtimeInfo", eboxStr.toString());
 
 
@@ -246,6 +256,8 @@ public class GWapi extends AbstractVerticle {
                     .put("ioModule", ioModuleJson)
                     .put("liquidCooling", liquidCoolingJson)
                     .put("pcs", pcsJson)
+                    .put("beidou", bdJson)
+                    .put("air", airJson)
                     .put("ebox", ebox);
 //            totalJson.put("bms", bmsJson);
             LOGGER.info("回复数据:{}", totalJson);
@@ -278,93 +290,97 @@ public class GWapi extends AbstractVerticle {
             String result = null;
             String message = HexUtils.hexBytesToHexString(transParentDataBytes);
             LOGGER.info("从云平台接收到的指令: {}", message);
-//            String message = "010302000CB841";
-            //"010659EC18085165"
-            //"01 10 797c 0002 04 00 01 00 01 6b4c"
-            if (device == null) {
-                String functionCode = message.substring(2, 4);   // 功能码（应为10）
-                if (functionCode.equals("03")) {
-                    try {
-                        result = CanServer.getInstance().sendMessageAndReceive(message);
-                        LOGGER.info("接收到can的返回: {}", result);
-                    } catch (Exception e) {
-                        LOGGER.info("发送失败：{}", e.getMessage());
-                    }
-                } else {
-                    //bms的序列号和时间必须是10，地址范围20001-20009、23020-23022  十六进制就是4E21-4E29、59EC-59EE
-                    String fisrtAddress = message.substring(4, 8);
-                    if ("4E21".equalsIgnoreCase(fisrtAddress) || "59EC".equalsIgnoreCase(fisrtAddress)) {
-                        try {
-                            result = CanServer.getInstance().sendMessageAndReceive(message);
-                            LOGGER.info("接收到can的返回: {}", result);
-                        } catch (Exception e) {
-                            LOGGER.info("发送失败：{}", e.getMessage());
-                        }
-                    } else {
-                        boolean flag = true;
-                        StringBuilder modbus10Builder = new StringBuilder();
-                        List<String> modbus06 = convertTo06FunctionCodes(message);
-                        if (modbus06 != null && modbus06.size() != 0) {
-                            for (int i = 0; i < modbus06.size(); i++) {
-                                try {
-                                    String modbus06Ret = CanServer.getInstance().sendMessageAndReceive(modbus06.get(i));
-                                    if (modbus06Ret.substring(2, 4).equals("86")) flag = false;
-                                    LOGGER.info("接收到can的返回: {}", modbus06Ret);
-                                } catch (Exception e) {
-                                    LOGGER.info("发送失败：{}", e.getMessage());
-                                }
-                            }
-                        }
-
-                        if (flag) {
-                            String data = message.substring(0, 12);
-                            byte[] crcDataByte = HexUtils.hexStringToByteArray(data);
-                            byte[] crc16 = CRC16.crc16CCITT(crcDataByte);
-                            String crcStr = HexUtils.hexBytesToHexString(crc16);
-                            result = modbus10Builder.append(data).append(crcStr).toString();
-                        } else {
-                            result = "0190018DC0";
-                        }
-                    }
-                }
-            } else {
-                //modbus设备
-                try {
-                    boolean flag = true;
-                    StringBuilder modbus10Builder = new StringBuilder();
-                    String function = message.substring(2, 4);
-                    String firstAddress = message.substring(4, 8);
-                    //除湿机转成06下发
-                    if ("10".equals(function) && DEHUMIDIFIER_ADDRESSES.contains(firstAddress)) {
-                        List<String> modbus6List = convertTo06FunctionCodes(message);
-                        if (modbus6List != null && modbus6List.size() != 0) {
-                            for (int i = 0; i < modbus6List.size(); i++) {
-                                String modbus6Ret = device.sendEmsCommand(modbus6List.get(i));
-                                if ("86".equals(modbus6Ret.substring(2, 4))) flag = false;
-                                LOGGER.info("接收到除湿机的返回: {}", modbus6Ret);
-                            }
-                        }
-
-                        if (flag) {
-                            String data = message.substring(0, 12);
-                            byte[] crcDataByte = HexUtils.hexStringToByteArray(data);
-                            byte[] crc16 = CRC16.crc16CCITT(crcDataByte);
-                            String crcStr = HexUtils.hexBytesToHexString(crc16);
-                            result = modbus10Builder.append(data).append(crcStr).toString();
-                        } else {
-                            result = "0190018DC0";
-                        }
-                    } else {
-                        LOGGER.info("云平台给设备透传：{}", message);
-//                    result = device.sendEmsCommand(HexUtils.hexBytesToHexString(message.getBytes()));
-                        result = device.sendEmsCommand(message);
-                        LOGGER.info("收到{}的返回：{}", device.getSerialNumber(), result);
-                    }
-                    } catch(Exception e){
-                        e.getMessage();
-                        LOGGER.warn("无法给设备下发指令: {}", e.getMessage());
-                    }
+            //etu
+            try {
+                result = CanServer.getInstance().sendMessageAndReceive(message);
+                LOGGER.info("接收到下位机的返回: {}", result);
+            } catch (Exception e) {
+                LOGGER.info("发送失败：{}", e.getMessage());
             }
+//            if (device == null) {
+//                String functionCode = message.substring(2, 4);   // 功能码（应为10）
+//                if (functionCode.equals("03")) {
+//                    try {
+//                        result = CanServer.getInstance().sendMessageAndReceive(message);
+//                        LOGGER.info("接收到can的返回: {}", result);
+//                    } catch (Exception e) {
+//                        LOGGER.info("发送失败：{}", e.getMessage());
+//                    }
+//                } else {
+//                    //bms的序列号和时间必须是10，地址范围20001-20009、23020-23022  十六进制就是4E21-4E29、59EC-59EE
+//                    String fisrtAddress = message.substring(4, 8);
+//                    if ("4E21".equalsIgnoreCase(fisrtAddress) || "59EC".equalsIgnoreCase(fisrtAddress)) {
+//                        try {
+//                            result = CanServer.getInstance().sendMessageAndReceive(message);
+//                            LOGGER.info("接收到can的返回: {}", result);
+//                        } catch (Exception e) {
+//                            LOGGER.info("发送失败：{}", e.getMessage());
+//                        }
+//                    } else {
+//                        boolean flag = true;
+//                        StringBuilder modbus10Builder = new StringBuilder();
+//                        List<String> modbus06 = convertTo06FunctionCodes(message);
+//                        if (modbus06 != null && modbus06.size() != 0) {
+//                            for (int i = 0; i < modbus06.size(); i++) {
+//                                try {
+//                                    String modbus06Ret = CanServer.getInstance().sendMessageAndReceive(modbus06.get(i));
+//                                    if (modbus06Ret.substring(2, 4).equals("86")) flag = false;
+//                                    LOGGER.info("接收到can的返回: {}", modbus06Ret);
+//                                } catch (Exception e) {
+//                                    LOGGER.info("发送失败：{}", e.getMessage());
+//                                }
+//                            }
+//                        }
+//
+//                        if (flag) {
+//                            String data = message.substring(0, 12);
+//                            byte[] crcDataByte = HexUtils.hexStringToByteArray(data);
+//                            byte[] crc16 = CRC16.crc16CCITT(crcDataByte);
+//                            String crcStr = HexUtils.hexBytesToHexString(crc16);
+//                            result = modbus10Builder.append(data).append(crcStr).toString();
+//                        } else {
+//                            result = "0190018DC0";
+//                        }
+//                    }
+//                }
+//            } else {
+//                //modbus设备
+//                try {
+//                    boolean flag = true;
+//                    StringBuilder modbus10Builder = new StringBuilder();
+//                    String function = message.substring(2, 4);
+//                    String firstAddress = message.substring(4, 8);
+//                    //除湿机转成06下发
+//                    if ("10".equals(function) && DEHUMIDIFIER_ADDRESSES.contains(firstAddress)) {
+//                        List<String> modbus6List = convertTo06FunctionCodes(message);
+//                        if (modbus6List != null && modbus6List.size() != 0) {
+//                            for (int i = 0; i < modbus6List.size(); i++) {
+//                                String modbus6Ret = device.sendEmsCommand(modbus6List.get(i));
+//                                if ("86".equals(modbus6Ret.substring(2, 4))) flag = false;
+//                                LOGGER.info("接收到除湿机的返回: {}", modbus6Ret);
+//                            }
+//                        }
+//
+//                        if (flag) {
+//                            String data = message.substring(0, 12);
+//                            byte[] crcDataByte = HexUtils.hexStringToByteArray(data);
+//                            byte[] crc16 = CRC16.crc16CCITT(crcDataByte);
+//                            String crcStr = HexUtils.hexBytesToHexString(crc16);
+//                            result = modbus10Builder.append(data).append(crcStr).toString();
+//                        } else {
+//                            result = "0190018DC0";
+//                        }
+//                    } else {
+//                        LOGGER.info("云平台给设备透传：{}", message);
+////                    result = device.sendEmsCommand(HexUtils.hexBytesToHexString(message.getBytes()));
+//                        result = device.sendEmsCommand(message);
+//                        LOGGER.info("收到{}的返回：{}", device.getSerialNumber(), result);
+//                    }
+//                    } catch(Exception e){
+//                        e.getMessage();
+//                        LOGGER.warn("无法给设备下发指令: {}", e.getMessage());
+//                    }
+//            }
             ctx.json(new ResponseResult<String>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), result));
         });
         
@@ -410,15 +426,13 @@ public class GWapi extends AbstractVerticle {
             }
             //30 时区更改
             if (keySet.contains(30)) {
-                String timeZoneByteStr = settingMap.get(30);
-                LOGGER.info("修改的时区: {}", timeZoneByteStr);
-                byte[] timeZoneByte = HexUtils.hexStringToByteArray(timeZoneByteStr);
-                String timeZone = HexUtils.hexByteToAscii(timeZoneByte);
+                String timeZone = settingMap.get(30);
                 LOGGER.info("修改的时区: {}", timeZone);
                 //修改配置
-                setTimezone(timeZone);
+//                setTimezone(timeZone);
+                //todo 暂时都改成ok
+                ctx.json(new ResponseResult<String>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), "ok"));
             }
-            //todo 暂时都改成ok
             ctx.json(new ResponseResult<String>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), "ok"));
         });
 
@@ -818,11 +832,14 @@ public class GWapi extends AbstractVerticle {
         String collectorSNHexStr = hexFormat.formatHex(emsBox.getSerialNumber().getBytes());
 //        String collectorSNHexStr = hexFormat.formatHex("EMS123467".getBytes());
 
+        DeviceMessage deviceMessage = DeviceMessage.getInstance();
+        String emsSN = deviceMessage.getEmsBox().getSerialNumber();
+
         //如果是io模块，序列号= IO+ems序列号
-        if (deviceType.equals("IOmodule")) {
-            DeviceMessage deviceMessage = DeviceMessage.getInstance();
-            String emsSN = deviceMessage.getEmsBox().getSerialNumber();
-            deviceSN = "IO" + emsSN;
+        switch (deviceType) {
+            case "IOmodule" -> deviceSN = "IO" + emsSN;
+            case "beidou" -> deviceSN = "BD" + emsSN;
+            case "AirConditioner" -> deviceSN = "Air" + emsSN;
         }
 
         String collectorSNHexStrFormat = padLeft(collectorSNHexStr, 30);
