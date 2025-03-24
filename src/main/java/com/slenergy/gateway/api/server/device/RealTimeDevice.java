@@ -63,7 +63,7 @@ public abstract class RealTimeDevice extends Device implements ChangeAttribute {
         // 容器存在且不在运行状态则重启容器
         // 容器不存在则跑容器
         if (docker.exist(name) && !docker.isRunning(name))
-            docker.restart(name);
+            docker.remove(name);
         else
             runContainer(docker, name);
     }

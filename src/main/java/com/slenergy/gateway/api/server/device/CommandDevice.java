@@ -47,10 +47,13 @@ public abstract class CommandDevice extends Device {
 
         // 容器存在且不在运行状态则重启容器
         // 容器不存在则跑容器
-        if (docker.exist(name) && !docker.isRunning(name))
-            docker.restart(name);
-        else
-            runContainer(docker, name);
+//        if (docker.exist(name) && !docker.isRunning(name))
+//            docker.restart(name);
+//        else
+//            runContainer(docker, name);
+        if (docker.exist(name))
+            docker.remove(name);
+        runContainer(docker, name);
     }
 
     private void runContainer(DockerExecutor docker, String name) throws SQLException, InterruptedException {
