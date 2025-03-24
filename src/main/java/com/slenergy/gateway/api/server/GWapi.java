@@ -579,6 +579,65 @@ public class GWapi extends AbstractVerticle {
             ctx.json(new ResponseResult<String>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), builder.toString()));
         });
 
+        router.post("/device/ems/getConfig").consumes("application/json").handler(ctx -> {
+            LOGGER.info("上报设置类数据");
+            //查询设置数据
+            //除湿机
+            String dhConfigInfoData = getInfoData(db, "dehumidifier", "configurationInformation","-30s");
+            //bms
+            String bmsConfigInfoData = getInfoData(db, "bms", "configurationInformation", "-30s");
+            //dido信息
+            String ioModuleConfigInfoData = getInfoData(db, "IOmodule", "configurationInformation", "-30s");
+            //液冷机信息
+            String liquidCoolingConfigInfoData = getInfoData(db, "liquidCooling", "configurationInformation", "-30s");
+            //pcs信息
+            String pcsConfigInfoData = getInfoData(db, "pcs", "configurationInformation", "-3m");
+            //空调信息
+            String airConfigInfoData = getInfoData(db, "AirConditioner", "configurationInformation", "-30s");
+            //北斗信息
+            String beidouConfigInfoData = getInfoData(db, "beidou", "configurationInformation", "-30s");
+            //数据采集器信息
+            DeviceMessage dm = DeviceMessage.getInstance();
+            EmsBox emsBox = dm.getEmsBox();
+            HexFormat hexFormat = HexFormat.of();
+            String collectorSNHexStr = hexFormat.formatHex(emsBox.getSerialNumber().getBytes());
+            String collectorSNHexStrFormat = padLeft(collectorSNHexStr, 30);
+            int emsBoxNum = dm.getEmsBoxNum();
+            String eboxNumFormat = HexUtils.hexBytesToHexString(HexUtils.intToHexBytes(emsBoxNum));
+            String emsBoxDicList = dm.getEmsBoxDicList(null);
+            StringBuilder builder = new StringBuilder();
+            StringBuilder eboxStr = builder.append(collectorSNHexStrFormat).append(eboxNumFormat).append("00").append(emsBoxDicList);
+
+
+            JsonObject totalJson = new JsonObject();
+            JsonObject dhJson = new JsonObject().put("runtimeInfo", null).put("configInfo", dhConfigInfoData);
+            JsonObject bmsJson = new JsonObject().put("runtimeInfo", null).put("configInfo", bmsConfigInfoData);
+            JsonObject bmsMonomerJson = new JsonObject().put("runtimeInfo", null);
+            JsonObject ioModuleJson = new JsonObject().put("runtimeInfo", null).put("configInfo", ioModuleConfigInfoData);
+            JsonObject liquidCoolingJson = new JsonObject().put("runtimeInfo", null).put("configInfo", liquidCoolingConfigInfoData);
+            JsonObject pcsJson = new JsonObject().put("runtimeInfo", null).put("configInfo", pcsConfigInfoData);
+            JsonObject airJson = new JsonObject().put("runtimeInfo", null).put("configInfo", airConfigInfoData);
+            JsonObject beidouJson = new JsonObject().put("runtimeInfo", null).put("configInfo", beidouConfigInfoData);
+            JsonObject ebox = new JsonObject().put("runtimeInfo", eboxStr.toString());
+
+            //查询实时数据和设置数据
+            //            String dhRuntimeInfoData = getInfoData(db, dehumidifier.getDeviceType(), dehumidifier.getDeviceName(), dehumidifier.getSerialNumber(), "runtimeInformation");
+            //            String dhConfigInfoData = getInfoData(db, dehumidifier.getDeviceType(), dehumidifier.getDeviceName(), dehumidifier.getSerialNumber(), "configurationInformation");
+
+            totalJson.put("dehumidifier", dhJson)
+                    .put("bms", bmsJson)
+                    .put("bms_monomer", bmsMonomerJson)
+                    .put("ioModule", ioModuleJson)
+                    .put("liquidCooling", liquidCoolingJson)
+                    .put("pcs", pcsJson)
+                    .put("air", airJson)
+                    .put("beidou", beidouJson)
+                    .put("ebox", ebox);
+            //            totalJson.put("bms", bmsJson);
+            LOGGER.info("回复数据:{}", totalJson);
+            ctx.json(new ResponseResult<>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), totalJson));
+        });
+
         router.get("/").handler(ctx -> ctx.json(new ResponseResult<String>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), null)));
 
         server.requestHandler(router);
