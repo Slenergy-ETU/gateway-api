@@ -31,11 +31,15 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.*;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.slenergy.gateway.api.server.device.CommandDevice.initializeCommandDevice;
@@ -190,7 +194,7 @@ public class GatewayAPIService {
     /**
      * 保存ems的信息
      * @param conn
-     * @param snFile
+     * @param signalFile
      * @param ipFile
      * @param port
      * @return 返回序列号
@@ -198,9 +202,10 @@ public class GatewayAPIService {
      * @throws InterruptedException
      * @throws SQLException
      */
-    private static String storeIBox(SQLiteConnection conn, String snFile, String ipFile, int port) throws IOException, InterruptedException, SQLException {
+    private static String storeIBox(SQLiteConnection conn, String signalFile, String ipFile, int port) throws IOException, InterruptedException, SQLException {
         // 获取序列号
-        String sn = getSystemSerialNumber(snFile);
+//        String sn = getSystemSerialNumber(snFile);
+        String sn = System.getenv("FBoxSN");
         LOGGER.info("获取到的序列号, {}", sn);
 //        String sn = "EMS123467";
         // 获取时区
@@ -208,39 +213,43 @@ public class GatewayAPIService {
         String tz = String.format("GMT%s", strTZ.substring(0, strTZ.length() - 2));
         // 获取ip地址
         String localIp = getLocalIp();
+        //4G信号强度
+        String signal = extractLatestSignalStrength(signalFile, 20);
 
         // 获取板子ip
 //        String remoteIp = "10.21.8.48";
-        String remoteIp = null;
-        {
-            // 一直等待存有ip地址的文件生成，直到找到该文件才继续初始化
-            boolean isSuccess = false;
-            while (!isSuccess) {
-                String line = null;
-                try {
-                    BufferedReader in = new BufferedReader(new FileReader(ipFile));
-                    line = in.readLine();
-                } catch (FileNotFoundException e) {
-                    LOGGER.warn("找不到ip存有ip地址的文件: {}", e.getMessage());
-                } catch (IOException e) {
-                    LOGGER.warn("读取文件失败: {}", e.getMessage());
-                }
+        String remoteIp = localIp;
+//        {
+//            // 一直等待存有ip地址的文件生成，直到找到该文件才继续初始化
+//            boolean isSuccess = false;
+//            while (!isSuccess) {
+//                String line = null;
+//                try {
+//                    BufferedReader in = new BufferedReader(new FileReader(ipFile));
+//                    line = in.readLine();
+//                } catch (FileNotFoundException e) {
+//                    LOGGER.warn("找不到ip存有ip地址的文件: {}", e.getMessage());
+//                } catch (IOException e) {
+//                    LOGGER.warn("读取文件失败: {}", e.getMessage());
+//                }
+//
+//                if (line != null && line.compareTo("") != 0) {
+//                    remoteIp = line;
+//                    isSuccess = true;
+//                }
+//
+//                try {
+//                    Thread.sleep(5000);
+//                } catch (InterruptedException e) {
+//                    LOGGER.warn("无法等待获取板子ip地址: {}", e.getMessage());
+//                }
+//            }
+//        }
 
-                if (line != null && line.compareTo("") != 0) {
-                    remoteIp = line;
-                    isSuccess = true;
-                }
-
-                try {
-                    Thread.sleep(5000);
-                } catch (InterruptedException e) {
-                    LOGGER.warn("无法等待获取板子ip地址: {}", e.getMessage());
-                }
-            }
-        }
+        LOGGER.info("localIp: {}, remoteIp: {}", localIp, remoteIp);
         //存在静态数据库
         conn.commitTransaction(List.of(
-                "insert into ibox (id, serialNumber, protocolType, protocolVersions, dataInterval, localIp, localPort, remoteIp, remotePort, model, firmwareVersion, wirelessType, timeZone, restart, gprs) values (1, ?, 0, '1.1', 1.0, ?, ?, ?, ?, 'kedge350', '1.0.0.0', 1, ?, 0, -75);",
+                "insert into ibox (id, serialNumber, protocolType, protocolVersions, dataInterval, localIp, localPort, remoteIp, remotePort, model, firmwareVersion, wirelessType, timeZone, restart, gprs) values (1, ?, 0, '1.1', 1.0, ?, ?, ?, ?, 'Q10', '1.0.0.0', 1, ?, 0, ?);",
                 "update mqtt set clientID = ? where id = ?;"
         ), List.of(
                 List.of(
@@ -249,7 +258,8 @@ public class GatewayAPIService {
                         port,
                         localIp,
                         port,
-                        tz
+                        tz,
+                        signal
                 ),
                 List.of(
                         sn,
@@ -267,12 +277,12 @@ public class GatewayAPIService {
         values.put("localPort", port);
         values.put("remoteIp", remoteIp);
         values.put("remotePort", port);
-        values.put("model", "kedge350");
+        values.put("model", "Q10");
         values.put("firmwareVersion", "1.0.0.0");
         values.put("wirelessType", 1);
         values.put("timeZone", tz);
         values.put("restart", 0);
-        values.put("gprs", -75);
+        values.put("gprs", signal);
 
         List<String> updateQueries = new ArrayList<>();
         List<List<Object>> params = new ArrayList<>();// 使用嵌套列表存储每条语句的参数
@@ -507,11 +517,18 @@ public class GatewayAPIService {
         String name = (String) mqttInfo.get("name");
 
         boolean isExited = docker.exist(name);
-        if (isExited && !docker.isRunning((name))) {
+//        if (isExited && !docker.isRunning((name))) {
+//            // 重启容器
+//            docker.restart(name);
+//            return;
+//        }
+
+        if (isExited) {
             // 重启容器
-            docker.restart(name);
-            return;
+            docker.remove(name);
         }
+
+        LOGGER.info("mqtt删除成功了吗？{}", docker.exist(name));
 
         // 开始跑容器
         Map<String, Object> interval = conn.queryOne("select dataInterval from ibox limit 1;", null);
@@ -547,7 +564,8 @@ public class GatewayAPIService {
                 "-u", (String) mqttStartInfo.get("username"),
                 "-pw", (String) mqttStartInfo.get("password")
         });
-
+        LOGGER.info("拉取的镜像：{}", mqttInfo.get("image"));
+        LOGGER.info("DOCKER_USERNAME: {}, DOCKER_TOKEN: {}", System.getenv("DOCKER_USERNAME"), System.getenv("DOCKER_TOKEN"));
         if (!docker.findImage((String) mqttInfo.get("image"))) {
             docker.pullImage((String) mqttInfo.get("image"), 300, TimeUnit.SECONDS, System.getenv("DOCKER_USERNAME"), System.getenv("DOCKER_TOKEN"));
         }
@@ -612,7 +630,7 @@ public class GatewayAPIService {
         if (((int) iboxCnt.get("num")) == 0) {
             LOGGER.info("第一次开机，收集ibox信息存入数据库");
             try {
-                sn = storeIBox(conn, config.getString("sn"), config.getString("ip"), config.getJsonObject("address").getInteger("port"));
+                sn = storeIBox(conn, config.getString("signal"), config.getString("ip"), config.getJsonObject("address").getInteger("port"));
             } catch (SQLException e) {
                 LOGGER.error("静态数据库出问题了: {}", e.getMessage());
                 System.exit(-3);
@@ -665,7 +683,7 @@ public class GatewayAPIService {
 
         //todo attention  查询modbus设备
         //启动扫描的时候，有可能是重启，所以先删除以后的容器
-        List<String> containerList = docker.getRunningContainerList();
+        List<String> containerList = docker.getAllContainerList();
         if (containerList != null && !containerList.isEmpty()) {
             for (int i = 0; i < containerList.size(); i++) {
                 LOGGER.info("容器：{}", containerList.get(i));
@@ -676,21 +694,20 @@ public class GatewayAPIService {
                     docker.remove(containerList.get(i));
             }
         }
-
-        //todo attention 扫描modbus设备
-        LOGGER.info("开始scan device");
-        try {
-            scanModbusDevices(conn, sn);
-        } catch (UnknownHostException e) {
-            LOGGER.error("无法获取当前的ip地址: {}", e.getMessage());
-            System.exit(-5);
-        } catch (SQLException e) {
-            LOGGER.error("数据库出问题了: {}", e.getMessage());
-            System.exit(-3);
-        }
-
-        LOGGER.info("扫描设备完成");
-
+//
+//        //todo attention 扫描modbus设备
+//        LOGGER.info("开始scan device");
+//        try {
+//            scanModbusDevices(conn, sn);
+//        } catch (UnknownHostException e) {
+//            LOGGER.error("无法获取当前的ip地址: {}", e.getMessage());
+//            System.exit(-5);
+//        } catch (SQLException e) {
+//            LOGGER.error("数据库出问题了: {}", e.getMessage());
+//            System.exit(-3);
+//        }
+//
+//        LOGGER.info("扫描设备完成");
 
         //todo attention 初始化mqtt
         try {
@@ -700,19 +717,19 @@ public class GatewayAPIService {
             System.exit(-3);
         }
 
-        List<Map<String, Object>> deviceInfo = null;
-        try {
-//            deviceInfo = conn.query("select serialNumber, deviceName, deviceType, ip, port, min, max, interval, pvPriority, batteryPowerLimited, utilityPowerLimited from device join address a on device.id = a.deviceId join power p on device.id = p.deviceId join load l on device.id = l.deviceId;", null);
-            deviceInfo = conn.query("select serialNumber, deviceName, deviceType, ip, port from device join address a on device.id = a.deviceId;", null);
-        } catch (SQLException e) {
-            LOGGER.error("无法获取所有modbus设备信息: {}", e.getMessage());
-            System.exit(-3);
-        }
-
-        LOGGER.info("modbus设备信息: {}", deviceInfo);
-        Map<String, Map<String, Object>> deviceInfoMatch = new HashMap<>();
-        for (Map<String, Object> elem : deviceInfo)
-            deviceInfoMatch.put((String) elem.get("deviceType"), elem);
+//        List<Map<String, Object>> deviceInfo = null;
+//        try {
+////            deviceInfo = conn.query("select serialNumber, deviceName, deviceType, ip, port, min, max, interval, pvPriority, batteryPowerLimited, utilityPowerLimited from device join address a on device.id = a.deviceId join power p on device.id = p.deviceId join load l on device.id = l.deviceId;", null);
+//            deviceInfo = conn.query("select serialNumber, deviceName, deviceType, ip, port from device join address a on device.id = a.deviceId;", null);
+//        } catch (SQLException e) {
+//            LOGGER.error("无法获取所有modbus设备信息: {}", e.getMessage());
+//            System.exit(-3);
+//        }
+//
+//        LOGGER.info("modbus设备信息: {}", deviceInfo);
+//        Map<String, Map<String, Object>> deviceInfoMatch = new HashMap<>();
+//        for (Map<String, Object> elem : deviceInfo)
+//            deviceInfoMatch.put((String) elem.get("deviceType"), elem);
 
 //         初始化设备
 //        if (!deviceInfoMatch.containsKey("inverter")) {
@@ -720,65 +737,37 @@ public class GatewayAPIService {
 //            System.exit(-3);
 //        }
 
-        //todo attention初始化除湿机
-        Map<String, Object> dhfInfo = deviceInfoMatch.get("dehumidifier");
-        if (deviceInfoMatch.containsKey("dehumidifier")) {
-            Dehumidifier dehumidifier = null;
-            try {
-                dehumidifier = (Dehumidifier) initializeCommandDevice("dehumidifier", config.getString("sql"), dhfInfo);
-            } catch (Exception e) {
-                LOGGER.error("无法初始化除湿机: {}", e.getMessage());
-            }
-            if (dehumidifier != null) {
-                LOGGER.info("除湿机序列号：{}, ", dehumidifier.getSerialNumber());
-                dm.addDehumidifier(dehumidifier.getSerialNumber(), dehumidifier);
-            }
-        }
-
-        //todo attention初始化液冷机
-        Map<String, Object> lcInfo = deviceInfoMatch.get("liquidCooling");
-        if (deviceInfoMatch.containsKey("liquidCooling")) {
-            LiquidCooling liquidCooling = null;
-            try {
-                liquidCooling = (LiquidCooling) initializeCommandDevice("liquidCooling", config.getString("sql"), lcInfo);
-            } catch (Exception e) {
-                LOGGER.error("无法初始化液冷机: {}", e.getMessage());
-            }
-            if (liquidCooling != null) {
-                LOGGER.info("液冷机序列号：{}, ", liquidCooling.getSerialNumber());
-                dm.addLiquidCooling(liquidCooling.getSerialNumber(), liquidCooling);
-            }
-        }
-
-
-        // 初始化逆变器
-//        Map<String, Object> invInfo = deviceInfoMatch.get("inverter");
-//        if (deviceInfoMatch.containsKey("inverter")) {
-//            Inverter inv = null;
+//        //todo attention初始化除湿机
+//        Map<String, Object> dhfInfo = deviceInfoMatch.get("dehumidifier");
+//        if (deviceInfoMatch.containsKey("dehumidifier")) {
+//            Dehumidifier dehumidifier = null;
 //            try {
-//                RealTimeDevice device = initializeRealTimeDevice("inverter", config.getString("sql"), invInfo);
-//                inv = device.getDeviceName().compareTo("solinteg") == 0 ? (SolintegInverter) device : (Inverter) device;
+//                dehumidifier = (Dehumidifier) initializeCommandDevice("dehumidifier", config.getString("sql"), dhfInfo);
 //            } catch (Exception e) {
-//                LOGGER.error("无法初始化逆变器: {}", e.getMessage());
+//                LOGGER.error("无法初始化除湿机: {}", e.getMessage());
 //            }
-//
-//            if (inv != null) {
-//                // 初始化电池
-//                Map<String, Object> batteryInfo = deviceInfoMatch.get("battery");
-//                Battery battery = null;
-//                try {
-//                    battery = (Battery) initializeRealTimeDevice("battery", config.getString("sql"), batteryInfo);
-//                } catch (Exception e) {
-//                    LOGGER.warn("无法初始化电池设备: {}", e.getMessage());
-//                }
-//
-//                if (battery != null) {
-//                    inv.setBatteryDevice(battery);
-//                    inc.addBattery(battery.getSerialNumber(), battery);
-//                }
-//                inc.addInverter(inv.getSerialNumber(), inv);
+//            if (dehumidifier != null) {
+//                LOGGER.info("除湿机序列号：{}, ", dehumidifier.getSerialNumber());
+//                dm.addDehumidifier(dehumidifier.getSerialNumber(), dehumidifier);
 //            }
 //        }
+//
+//        //todo attention初始化液冷机
+//        Map<String, Object> lcInfo = deviceInfoMatch.get("liquidCooling");
+//        if (deviceInfoMatch.containsKey("liquidCooling")) {
+//            LiquidCooling liquidCooling = null;
+//            try {
+//                liquidCooling = (LiquidCooling) initializeCommandDevice("liquidCooling", config.getString("sql"), lcInfo);
+//            } catch (Exception e) {
+//                LOGGER.error("无法初始化液冷机: {}", e.getMessage());
+//            }
+//            if (liquidCooling != null) {
+//                LOGGER.info("液冷机序列号：{}, ", liquidCooling.getSerialNumber());
+//                dm.addLiquidCooling(liquidCooling.getSerialNumber(), liquidCooling);
+//            }
+//        }
+
+
 
 
         // 初始化后端
@@ -910,5 +899,52 @@ public class GatewayAPIService {
 //        }
 
     }
+
+    // 从文件的最后 N 行中提取信号强度
+    private static String extractLatestSignalStrength(String filePath, int numLines) {
+        String signalStrength = "";
+        try {
+            // 使用RandomAccessFile来从文件末尾读取
+            RandomAccessFile file = new RandomAccessFile(filePath, "r");
+
+            // 获取文件的总行数
+            long fileLength = file.length();
+            long pointer = fileLength - 1; // 从文件的末尾开始读取
+
+            // 用来存储读取的最后 N 行
+            LinkedList<String> lastNLines = new LinkedList<>();
+
+            // 读取文件的最后 N 行
+            while (pointer >= 0 && lastNLines.size() < numLines) {
+                file.seek(pointer);
+                char c = (char) file.readByte();
+                if (c == '\n') {
+                    lastNLines.addFirst(file.readLine());
+                }
+                pointer--;
+            }
+
+            // 关闭文件
+            file.close();
+
+            // 正则表达式，匹配信号强度部分
+            String regex = "\\+CSQ: (\\d+),\\d+";
+            Pattern pattern = Pattern.compile(regex);
+
+            // 遍历最后 N 行并提取信号强度
+            for (String line : lastNLines) {
+                Matcher matcher = pattern.matcher(line);
+                if (matcher.find()) {
+                    signalStrength = matcher.group(1);
+                    break;  // 只提取最新的一条信号强度
+                }
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return signalStrength;
+    }
+
 
 }
