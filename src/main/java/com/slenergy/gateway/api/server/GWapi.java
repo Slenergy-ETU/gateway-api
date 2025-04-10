@@ -107,6 +107,8 @@ public class GWapi extends AbstractVerticle {
 
     private InfluxConnection connection;
 
+    private DeviceMessage dm = DeviceMessage.getInstance();
+
     @Override
     public void start() throws Exception {
         JsonObject config = config();
@@ -220,7 +222,6 @@ public class GWapi extends AbstractVerticle {
             String airConfigInfoData = getInfoData(db, "AirConditioner", "configurationInformation", "-30s");
 
             //数据采集器信息
-            DeviceMessage dm = DeviceMessage.getInstance();
             EmsBox emsBox = dm.getEmsBox();
             HexFormat hexFormat = HexFormat.of();
             String collectorSNHexStr = hexFormat.formatHex(emsBox.getSerialNumber().getBytes());
@@ -284,7 +285,6 @@ public class GWapi extends AbstractVerticle {
             //透传数据区
             byte[] transParentDataBytes = Arrays.copyOfRange(dataByte, 62, dataByte.length);
 //            透传
-            DeviceMessage dm = DeviceMessage.getInstance();
             CommandDevice device = dm.getCommandDevice(deviceSn);
 
             String result = null;
@@ -381,6 +381,14 @@ public class GWapi extends AbstractVerticle {
 //                        LOGGER.warn("无法给设备下发指令: {}", e.getMessage());
 //                    }
 //            }
+            String functionCode = message.substring(2, 4);
+            if (result != null) {
+                if ("10".equals(functionCode) || "06".equals(functionCode)) {
+                    result = "w" + result;
+                } else {
+                    result = "r" + result;
+                }
+            }
             ctx.json(new ResponseResult<String>(ResponseEnum.SUCCESS.getCode(), ResponseEnum.SUCCESS.getMessage(), result));
         });
         
@@ -461,7 +469,7 @@ public class GWapi extends AbstractVerticle {
             result.append(dataStr.substring(0, 64));
             //状态码 0x00成功 0x01不合法
             result.append("00");
-            DeviceMessage dm = DeviceMessage.getInstance();
+
             //判断是否包括31 系统时间属性
             boolean contains31 = Arrays.stream(parameter).anyMatch(x -> x == 31);
             if (contains31) {
@@ -499,7 +507,6 @@ public class GWapi extends AbstractVerticle {
             try {
                 LOGGER.info("云平台给设备透传：{}", "0103759400041fe9");
 //                    result = device.sendEmsCommand(HexUtils.hexBytesToHexString(message.getBytes()));
-                DeviceMessage dm = DeviceMessage.getInstance();
                 CommandDevice device = dm.getCommandDevice("1");
                 String s = device.sendEmsCommand("0103759400041fe9");
                 LOGGER.info("收到{}的返回：{}", device.getSerialNumber(), s);
@@ -529,7 +536,6 @@ public class GWapi extends AbstractVerticle {
 //        上报固件升级的进度
         router.post("/device/update/getProcess").consumes("application/octet-stream").handler(ctx -> {
             HexFormat hexFormat = HexFormat.of();
-            DeviceMessage dm = DeviceMessage.getInstance();
             EmsBox emsBox = dm.getEmsBox();
             //采集器序列号
             String collectorSNHexStr = hexFormat.formatHex(emsBox.getSerialNumber().getBytes());
@@ -597,7 +603,6 @@ public class GWapi extends AbstractVerticle {
             //北斗信息
             String beidouConfigInfoData = getInfoData(db, "beidou", "configurationInformation", "-30s");
             //数据采集器信息
-            DeviceMessage dm = DeviceMessage.getInstance();
             EmsBox emsBox = dm.getEmsBox();
             HexFormat hexFormat = HexFormat.of();
             String collectorSNHexStr = hexFormat.formatHex(emsBox.getSerialNumber().getBytes());
@@ -655,7 +660,37 @@ public class GWapi extends AbstractVerticle {
         }
         String serialNumber = (String) info.get(0).get("deviceSN");
         Map<String, Map<String, Object>> runtimeMap = splitMap(info.get(0), FILTER_EXPRESSION);
-        return convertDataIntoSegment(runtimeMap.get("numericKeys"), serialNumber, deviceType);
+
+        String result = null;
+
+        // 设置最大重试次数，避免无限循环
+        int maxRetryCount = 2;
+        int retryCount = 0;
+
+        result = convertDataIntoSegment(runtimeMap.get("numericKeys"), serialNumber, deviceType);
+        while (result == null && retryCount < maxRetryCount) {
+            result = convertDataIntoSegment(runtimeMap.get("numericKeys"), serialNumber, deviceType);
+
+            if ("Error".equals(result)) {
+                retryCount++;
+                LOGGER.warn("第{}次重试，查询数据仍然返回null", retryCount);
+                // 延迟100ms
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();  // 恢复中断状态
+                    LOGGER.error("线程中断", e);
+                }
+            }
+        }
+
+        // 如果最大重试次数达到，返回null
+        if ("Error".equals(result)) {
+            LOGGER.error("最大重试次数达到，仍未获取到有效数据");
+            return null;
+        }
+
+        return result;
     }
 
     private String getbmsMonomerInfoData(JsonObject db, String infoType) {
@@ -882,7 +917,7 @@ public class GWapi extends AbstractVerticle {
         return output.toString();
     }
 
-    public static String convertDataIntoSegment(Map<String, Object> data, String deviceSN, String deviceType) {
+    public static synchronized String convertDataIntoSegment(Map<String, Object> data, String deviceSN, String deviceType) {
         // todo 获取数据采集器序列号和设备序列号（假设长度为30字节）
         HexFormat hexFormat = HexFormat.of();
         DeviceMessage dm = DeviceMessage.getInstance();
@@ -946,6 +981,10 @@ public class GWapi extends AbstractVerticle {
             }
 
         }
+
+        if (isDataMissing(segments)) {
+            return "Error";
+        }
         // 构建完整的输出
         StringBuilder output = new StringBuilder();
         output.append(collectorSNHexStrFormat);         //数据采集器序列号
@@ -961,6 +1000,8 @@ public class GWapi extends AbstractVerticle {
             case "electricityMeter" -> output.append("fd01");
             case "IOmodule" -> output.append("f601");
             case "pcs" -> output.append("ff03");
+            case "AirConditioner" -> output.append("f501");
+            case "beidou" -> output.append("f401");
         }
         output.append(String.format("%02X", segmentCount));
         //单体信息拼接特殊
@@ -1110,6 +1151,43 @@ public class GWapi extends AbstractVerticle {
         } catch (IOException | InterruptedException e) {
             LOGGER.info("错误: 执行命令失败 - {}", e.getMessage());
         }
+    }
+
+
+    // 判断数据是否缺失
+    public static boolean isDataMissing(List<String> segments) {
+        // 假设每段数据结构为：起始地址(4位) + 结束地址(4位) + 数据值
+        // 每段数据由8个字符组成：4位地址+4位数据7
+        for (String segment : segments) {
+            // 校验每段数据的完整性，假设每个段的最小长度为8
+            if (segment.length() < 8) {
+                System.out.println("Invalid segment length: " + segment);
+                return true; // 数据长度不匹配，认为数据缺失
+            }
+
+            // 解析起始地址和结束地址
+            String startAddressHex = segment.substring(0, 4);
+            String endAddressHex = segment.substring(4, 8);
+
+            // 将地址转换为十进制
+            long startAddress = Long.parseLong(startAddressHex, 16);
+            long endAddress = Long.parseLong(endAddressHex, 16);
+
+            // 计算地址差值
+            long addressDiff = endAddress - startAddress + 1;
+
+            // 获取数据值的数量（数据值从第9位开始到末尾）
+            int valueCount = (segment.length() - 8) / 4; // 8位是地址，剩下是数据
+
+            // 判断是否数据缺失
+            if (addressDiff != valueCount) {
+                LOGGER.info("Data missing between addresses: " + startAddressHex + " - " + endAddressHex);
+                return true; // 数据缺失
+            }
+        }
+
+        // 如果所有段的地址差值和数据个数匹配，则认为数据完整
+        return false;
     }
 
 }
